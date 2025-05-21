@@ -2,7 +2,7 @@ import os
 import secrets
 from typing import List, Optional, Dict, Any, Union
 
-from pydantic import BaseModel, BaseSettings, PostgresDsn, validator, AnyHttpUrl
+from pydantic import BaseModel, BaseSettings, validator, AnyHttpUrl
 
 
 class Settings(BaseSettings):
@@ -15,7 +15,11 @@ class Settings(BaseSettings):
     CORS_ORIGINS: List[str] = ["http://localhost:3000", "http://localhost:5173"]
     
     # Database
-    DATABASE_URL: Optional[PostgresDsn] = "postgresql://postgres:postgres@localhost/study_assistant"
+    # For Neon PostgreSQL, we directly use the full connection string
+    DATABASE_URL: str = os.getenv(
+        "DATABASE_URL", 
+        "postgresql://neondb_owner:npg_JA4gcr6lhPoU@ep-lucky-hall-a5zks4z3-pooler.us-east-2.aws.neon.tech/neondb?sslmode=require"
+    )
     
     # Vector database
     VECTOR_DB_TYPE: str = "faiss"  # Options: faiss, qdrant, weaviate, pgvector
