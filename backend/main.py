@@ -1,10 +1,10 @@
+import os
 from fastapi import FastAPI, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
-from fastapi.security import OAuth2PasswordBearer
 
-from app.api import auth, documents, chat, study_tools
+from app.api import router_list
 from app.core.config import settings
 from app.core.exceptions import CustomException
 from app.db.database import engine, Base
@@ -20,6 +20,10 @@ logger = logging.getLogger(__name__)
 # Create database tables
 Base.metadata.create_all(bind=engine)
 
+# Create necessary directories
+os.makedirs(settings.UPLOAD_DIRECTORY, exist_ok=True)
+
+# Create FastAPI app
 app = FastAPI(
     title="Study Assistant API",
     description="API for the Study Assistant application",
@@ -44,10 +48,8 @@ async def custom_exception_handler(request, exc):
     )
 
 # Mount the API routers
-app.include_router(auth.router, prefix="/api", tags=["Authentication"])
-app.include_router(documents.router, prefix="/api", tags=["Documents"])
-app.include_router(chat.router, prefix="/api", tags=["Chat"])
-app.include_router(study_tools.router, prefix="/api", tags=["Study Tools"])
+for router in router_list:
+    app.include_router(router)
 
 # Mount static files for document storage
 app.mount("/uploads", StaticFiles(directory=settings.UPLOAD_DIRECTORY), name="uploads")

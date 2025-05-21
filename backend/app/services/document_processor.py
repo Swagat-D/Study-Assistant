@@ -1,19 +1,17 @@
 import os
-import tempfile
-from typing import List, Dict, Any, Optional, BinaryIO
+from typing import Dict, Any, List, Tuple, Optional
 from pathlib import Path
+import logging
 
+from fastapi import UploadFile, HTTPException, status
 import fitz  # PyMuPDF
 import docx
-from fastapi import UploadFile, HTTPException
-import logging
 
 from app.core.config import settings
 from app.utils.text_utils import chunk_text
-from app.utils.file_utils import get_file_extension, save_upload_file
+from app.utils.file_utils import save_upload_file, get_file_extension
 
 logger = logging.getLogger(__name__)
-
 
 class DocumentProcessor:
     """
@@ -45,27 +43,28 @@ class DocumentProcessor:
         
         if file_size > settings.MAX_UPLOAD_SIZE:
             raise HTTPException(
-                status_code=413,
+                status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
                 detail=f"File too large. Max size: {settings.MAX_UPLOAD_SIZE / (1024 * 1024)}MB"
             )
         
-        # Get file extension and validate
+        # Get file extension
         file_extension = get_file_extension(file.filename)
         
         if file_extension.lower() not in ["pdf", "docx"]:
             raise HTTPException(
-                status_code=400,
+                status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
                 detail="Unsupported file format. Only PDF and DOCX are supported."
             )
         
-        # Save the file
+        # Create save path if not provided
         if not save_path:
             save_path = os.path.join(
                 settings.UPLOAD_DIRECTORY,
-                f"{user_id}",
+                user_id,
                 Path(file.filename).name
             )
         
+        # Save the file
         file_path = await save_upload_file(file, save_path)
         
         # Extract text content based on file type
@@ -89,7 +88,7 @@ class DocumentProcessor:
             "file_path": file_path,
             "file_type": file_extension.lower(),
             "file_size": file_size,
-            "num_pages": metadata.get("num_pages"),
+            "num_pages": metadata.get("num_pages", 1),
             "text_content": text_content,
             "metadata": metadata,
             "chunks": [{"text": chunk, "chunk_index": i} for i, chunk in enumerate(chunks)],
@@ -98,7 +97,7 @@ class DocumentProcessor:
         return document_data
 
     @staticmethod
-    def _extract_pdf_text(file_path: str) -> tuple[str, Dict[str, Any]]:
+    def _extract_pdf_text(file_path: str) -> Tuple[str, Dict[str, Any]]:
         """
         Extract text content and metadata from a PDF file.
         
@@ -139,12 +138,12 @@ class DocumentProcessor:
         except Exception as e:
             logger.error(f"Error extracting text from PDF: {str(e)}")
             raise HTTPException(
-                status_code=500, 
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, 
                 detail=f"Failed to process PDF file: {str(e)}"
             )
 
     @staticmethod
-    def _extract_docx_text(file_path: str) -> tuple[str, Dict[str, Any]]:
+    def _extract_docx_text(file_path: str) -> Tuple[str, Dict[str, Any]]:
         """
         Extract text content and metadata from a Word document.
         
@@ -158,28 +157,46 @@ class DocumentProcessor:
             doc = docx.Document(file_path)
             
             # Extract metadata
-            core_properties = doc.core_properties
             metadata = {
-                "title": core_properties.title or "",
-                "author": core_properties.author or "",
-                "subject": core_properties.subject or "",
-                "keywords": core_properties.keywords or "",
-                "created": str(core_properties.created) if core_properties.created else "",
-                "modified": str(core_properties.modified) if core_properties.modified else "",
-                "num_pages": None,  # DOCX doesn't have a direct way to get page count
+                "title": "",
+                "author": "",
+                "subject": "",
+                "keywords": "",
+                "num_pages": None,  # DOCX doesn't have a straightforward way to get page count
             }
             
+            # Try to get properties if available
+            try:
+                core_properties = doc.core_properties
+                metadata["title"] = core_properties.title or ""
+                metadata["author"] = core_properties.author or ""
+                metadata["subject"] = core_properties.subject or ""
+                metadata["keywords"] = core_properties.keywords or ""
+            except:
+                pass  # Ignore if properties aren't available
+            
             # Extract text from paragraphs
-            text_content = "\n\n".join([para.text for para in doc.paragraphs if para.text])
+            paragraphs = []
+            for para in doc.paragraphs:
+                if para.text.strip():
+                    paragraphs.append(para.text)
+            
+            text_content = "\n\n".join(paragraphs)
+            
+            # Estimate number of pages (very rough)
+            # Assuming ~3000 characters per page
+            est_pages = max(1, len(text_content) // 3000)
+            metadata["num_pages"] = est_pages
             
             return text_content, metadata
             
         except Exception as e:
             logger.error(f"Error extracting text from DOCX: {str(e)}")
             raise HTTPException(
-                status_code=500, 
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, 
                 detail=f"Failed to process Word document: {str(e)}"
             )
 
 
+# Create a singleton instance
 document_processor = DocumentProcessor()

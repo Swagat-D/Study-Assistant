@@ -9,7 +9,8 @@ logger = logging.getLogger(__name__)
 # Create SQLAlchemy engine
 try:
     engine = create_engine(
-        str(settings.DATABASE_URL),
+        settings.DATABASE_URL,
+        connect_args={"check_same_thread": False} if settings.DATABASE_URL.startswith("sqlite") else {},
         pool_pre_ping=True,
         echo=False,
     )
